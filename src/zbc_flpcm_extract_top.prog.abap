@@ -35,23 +35,28 @@
 *&----------------------------------------------------------------------------&"
 *&   Global Constants                                                         &"
 *&----------------------------------------------------------------------------&"
-CONSTANTS: gc_scope_cust               TYPE /ui2/fdm_scope VALUE 'CUST'                                           ,
-           gc_scope_conf               TYPE /ui2/fdm_scope VALUE 'CONF'                                           ,
-           gc_param_txt_label_var_name TYPE string         VALUE '_%_APP_%-TEXT'                                  ,
-           gc_catalog_id_prexif_cat    TYPE string         VALUE /ui2/if_fdm_db=>gc_catalog_provider-catalog_page , " X-SAP-UI2-CATALOGPAGE
-           gc_catalog_id_prexif_car    TYPE string         VALUE /ui2/if_fdm_db=>gc_catalog_provider-adcat        , " X-SAP-UI2-ADCAT
-           gc_chip_id_prefix_car       TYPE string         VALUE /ui2/if_fdm_db=>gc_chip_provider-adchip          , " X-SAP-UI2-ADCHIP
-           gc_chip_id_prefix_cat       TYPE string         VALUE /ui2/if_fdm_db=>gc_chip_provider-page            , " X-SAP-UI2-PAGE
-           gc_prop_text_key_title      TYPE string         VALUE /ui2/if_fdm_db=>gc_text_key-title                , " display_title_text
-           gc_prop_text_key_subtitle   TYPE string         VALUE /ui2/if_fdm_db=>gc_text_key-subtitle             , " display_subtitle_text
-           gc_prop_text_key_info       TYPE string         VALUE /ui2/if_fdm_db=>gc_text_key-info                 , " display_info_text
-           gc_prop_text_key_keywords   TYPE string         VALUE /ui2/if_fdm_db=>gc_text_key-keywords             , " display_search_keywords
-           gc_catalog_typ_cat(3)       TYPE c              VALUE 'CAT'                                            ,
-           gc_catalog_typ_car(3)       TYPE c              VALUE 'CAR'                                            ,
-           gc_sign_i                   TYPE sign           VALUE 'I'                                              ,
-           gc_opt_eq                   TYPE option         VALUE 'EQ'                                             ,
-           gc_bag_id_title_pty         TYPE /ui2/page_id   VALUE 'tileProperties'                                 .
-
+CONSTANTS: gc_scope_cust               TYPE /ui2/fdm_scope        VALUE 'CUST'                                           ,
+           gc_scope_conf               TYPE /ui2/fdm_scope        VALUE 'CONF'                                           ,
+           gc_param_txt_label_var_name TYPE string                VALUE '_%_APP_%-TEXT'                                  ,
+           gc_catalog_id_prexif_cat    TYPE string                VALUE /ui2/if_fdm_db=>gc_catalog_provider-catalog_page , " X-SAP-UI2-CATALOGPAGE
+           gc_catalog_id_prexif_car    TYPE string                VALUE /ui2/if_fdm_db=>gc_catalog_provider-adcat        , " X-SAP-UI2-ADCAT
+           gc_chip_id_prefix_car       TYPE string                VALUE /ui2/if_fdm_db=>gc_chip_provider-adchip          , " X-SAP-UI2-ADCHIP
+           gc_chip_id_prefix_cat       TYPE string                VALUE /ui2/if_fdm_db=>gc_chip_provider-page            , " X-SAP-UI2-PAGE
+           gc_prop_text_key_title      TYPE string                VALUE /ui2/if_fdm_db=>gc_text_key-title                , " display_title_text
+           gc_prop_text_key_subtitle   TYPE string                VALUE /ui2/if_fdm_db=>gc_text_key-subtitle             , " display_subtitle_text
+           gc_prop_text_key_info       TYPE string                VALUE /ui2/if_fdm_db=>gc_text_key-info                 , " display_info_text
+           gc_prop_text_key_keywords   TYPE string                VALUE /ui2/if_fdm_db=>gc_text_key-keywords             , " display_search_keywords
+           gc_catalog_typ_cat(3)       TYPE c                     VALUE 'CAT'                                            ,
+           gc_catalog_typ_car(3)       TYPE c                     VALUE 'CAR'                                            ,
+           gc_sign_i                   TYPE sign                  VALUE 'I'                                              ,
+           gc_opt_eq                   TYPE option                VALUE 'EQ'                                             ,
+           gc_bag_id_title_pty         TYPE /ui2/page_id          VALUE 'tileProperties'                                 ,
+           gc_ico_tile                 TYPE /ui2/fcm_ttm_matching VALUE '@89@'                                           ," Blue square over a dark one
+           gc_ico_tm                   TYPE /ui2/fcm_ttm_matching VALUE '@8A@'                                           ," White square under a yellow one
+           gc_ico_tiletm               TYPE /ui2/fcm_ttm_matching VALUE '@8C@'                                           ," Double black square with intersec
+           gc_ttm_type_tile            TYPE /ui2/fdm_tile_type    VALUE 'TILE'                                           ,
+           gc_ttm_type_tile_tm         TYPE /ui2/fdm_tile_type    VALUE 'TILE_TARGET_MAPPING'                            ,
+           gc_ttm_type_tm              TYPE /ui2/fdm_tile_type    VALUE 'TARGET_MAPPING'                                 .
 
 
 *&----------------------------------------------------------------------------&"
@@ -77,26 +82,12 @@ TYPES: BEGIN OF ty_report_text  ,
          text(50) TYPE c        , " Text Value
        END   OF ty_report_text .
 
-*TYPES: BEGIN OF ty_csv_extract                             ,
-*                                                             " Composite Role
-*                                                             " Father Role
-*                                                             " Simple / Child Role
-*        id                  TYPE /ui2/fdm_catalog_id       , " Catalogue ID
-*        title               TYPE /ui2/fdm_catalog_title    , " Catalogue Title
-*        type                TYPE /ui2/fcm_ttm_matching     , " Tile/TM Type (TILE/TM)
-*        ttm_title           TYPE /ui2/fcm_ttm_title        , " Tile/TM Title
-*        semantic_object     TYPE /ui2/fdm_semantic_object  , " Semantic Object
-*        semantic_action     TYPE /ui2/fdm_semantic_action  , " Semantic Action
-*        fiori_id            TYPE /ui2/fcm_ttm_fiori_id     , " SAP Fiori Library ID
-*        tm_orig_id          TYPE /ui2/fcm_ttm_tm_orig_id   , " ID du mappage cible d'origine
-*        tm_orig_catalog_id  TYPE /ui2/fcm_ttm_tm_cat_id    , " ID de catalogue de mappages cibles
-*                                                             " Space
-*                                                             " Space Desription
-*       END   OF ty_csv_extract                             .
-
-TYPES: BEGIN OF ty_csv_catalog               ,
-         catalog_id TYPE /ui2/fdm_catalog_id , " Catalog ID
-       END   OF ty_csv_catalog               .
+TYPES: BEGIN OF ty_csv_catalog                  ,
+         catalog_id  TYPE /ui2/fdm_catalog_id   , " Catalog ID
+         type        TYPE /ui2/fdm_catalog_type , " Type
+         scope       TYPE /ui2/fdm_scope        , " Scope
+         master_lang TYPE masterlang            , " Master Language
+       END   OF ty_csv_catalog                  .
 
 TYPES: BEGIN OF ty_csv_catalog_text          ,
          catalog_id TYPE /ui2/fdm_catalog_id , " Catalog ID
@@ -105,24 +96,34 @@ TYPES: BEGIN OF ty_csv_catalog_text          ,
          title      TYPE string              , " Title in language
        END   OF ty_csv_catalog_text          .
 
-*TYPES: BEGIN OF ty_csv_tile_tm               ,
-*         tile_id    TYPE
-*       END   OF ty_csv_tile_tm               .
-*
-*TYPES: BEGIN OF ty_csv_tile_tm_text          ,
-*         tile_id    TYPE n
-*         langu      TYPE langu               , " Language
-*         sptxt      TYPE sptxt               , " Language Designation
-*         title      TYPE string              , " Title in language
-*       END   OF ty_csv_tile_tm_text          .
+TYPES: BEGIN OF ty_csv_tile_tm                           ,
+         cdm3_ba_id      TYPE /ui2/fcm_ttm_id            , " Tile TM ID
+         type            TYPE /ui2/fdm_tile_type         , " Type (TILE, TM, TILE + TM)
+         tile_orig_id    TYPE /ui2/fcm_ttm_tile_orig_id  , " Tile ID when Tile Only of Tile + TM
+         tm_orig_id      TYPE /ui2/fcm_ttm_tm_orig_id    , " TM ID when TM only of Tile + TM
+         catalog_orig_id TYPE /ui2/fcm_ttm_tile_cat_id   , " Catalog Origin ID
+         semantic_obj    TYPE /ui2/fdm_semantic_object   , " Semantic Object
+         semantic_act    TYPE /ui2/fdm_semantic_action   , " Semantic Action
+         fiori_id        TYPE /ui2/fcm_ttm_fiori_id      , " Fiori Application Id (App Library)
+         transaction     TYPE /ui2/fcm_tm_transaction    , " Transaction SAP
+       END   OF ty_csv_tile_tm                           .
 
 
-TYPES: BEGIN OF ty_csv_roles                 ,
-         agr_name_c TYPE agr_name_c          , " Composite Role
-         agr_name   TYPE agr_name            , " Simple Role
-         parent_agr TYPE par_agr             , " Father Role
-         catalog_id TYPE /ui2/fdm_catalog_id , " Catalog ID
-       END   OF ty_csv_roles                 .
+TYPES: BEGIN OF ty_csv_tile_tm_text          ,
+         cdm3_ba_id TYPE /ui2/fcm_ttm_id     , " Tile TM ID
+         langu      TYPE langu               , " Language
+         sptxt      TYPE sptxt               , " Language Designation
+         title      TYPE string              , " Title in language
+       END   OF ty_csv_tile_tm_text          .
+
+
+TYPES: BEGIN OF ty_csv_roles                         ,
+          catalog_id  TYPE /ui2/fdm_catalog_id       , " Catalog ID
+*         agr_name_c  TYPE agr_name_c                , " Composite Role
+          agr_name    TYPE agr_name                  , " Simple Role
+          description TYPE /ui2/fcm_role_description , " Description
+*         parent_agr   TYPE par_agr                   , " Father Role
+       END   OF ty_csv_roles                         .
 
 
 
@@ -130,10 +131,11 @@ TYPES: BEGIN OF ty_csv_roles                 ,
 "&   Global Variables                                                         &"
 "&----------------------------------------------------------------------------&"
 " Global Objects
-DATA: go_flp_cont_mgr TYPE REF TO /ui2/if_flp_cont_mgr    ,
-      go_messaging    TYPE REF TO /ui2/if_fcm_messaging   ,
-      go_catalog_api  TYPE REF TO /ui2/cl_fdm_catalog_api ,
-      go_type_mapper  TYPE REF TO /ui2/cl_fcm_type_mapper .
+DATA: go_flp_cont_mgr       TYPE REF TO /ui2/if_flp_cont_mgr           ,
+      go_messaging          TYPE REF TO /ui2/if_fcm_messaging          ,
+      go_catalog_api        TYPE REF TO /ui2/cl_fdm_catalog_api        ,
+      go_type_mapper        TYPE REF TO /ui2/cl_fcm_type_mapper        ,
+      go_progress_indicator TYPE REF TO /ui2/cl_gui_progress_indicator .
 
 " Global Variable
 DATA: gv_screen_name_len        TYPE i ,
@@ -177,12 +179,14 @@ DATA: gt_report_texts TYPE TABLE OF ty_report_text                              
       gs_t002t        TYPE          t002t                                               ,
       gt_propt        TYPE TABLE OF ty_propt                                            ,
       gs_propt        TYPE          ty_propt                                            ,
-*      gt_csv_extract  TYPE TABLE OF ty_csv_extract                                      ,
-*      gs_csv_extract  TYPE          ty_csv_extract                                      ,
       gt_csv_catalog  TYPE TABLE OF ty_csv_catalog                                      ,
       gs_csv_catalog  TYPE          ty_csv_catalog                                      ,
       gt_csv_catalogt TYPE TABLE OF ty_csv_catalog_text                                 ,
       gs_csv_catalogt TYPE          ty_csv_catalog_text                                 ,
+      gt_csv_tiletm   TYPE TABLE OF ty_csv_tile_tm                                      ,
+      gs_csv_tiletm   TYPE          ty_csv_tile_tm                                      ,
+      gt_csv_tiletmt  TYPE TABLE OF ty_csv_tile_tm_text                                 ,
+      gs_csv_tiletmt  TYPE          ty_csv_tile_tm_text                                 ,
       gt_csv_role     TYPE TABLE OF ty_csv_roles                                        ,
       gs_csv_role     TYPE          ty_csv_roles                                        .
 

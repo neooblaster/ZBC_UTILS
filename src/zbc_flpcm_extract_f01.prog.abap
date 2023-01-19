@@ -68,6 +68,13 @@ FORM initialize .
   APPEND VALUE #( key = 'SCOPE_CUST_DESCR' spras = 'F' text = 'Customizing'    ) TO gt_report_texts.
   APPEND VALUE #( key = 'SCOPE_CUST_DESCR' spras = 'E' text = 'Customizing'    ) TO gt_report_texts.
 
+
+
+  " --------------------------------------------------------------------------
+  "  Initialize Utils
+  " --------------------------------------------------------------------------
+  go_progress_indicator = new /ui2/cl_gui_progress_indicator( ).
+
 ENDFORM.
 "&---[   INITIALIZE   ]-------------------------------------------------------&"
 "&----------------------------------------------------------------------------&"
@@ -285,6 +292,10 @@ FORM get_data.
   go_flp_cont_mgr->initialize_tables_for_catalogs( ).       " This statement collects all Catalog / Tile TM data
   gt_catalog_list = go_flp_cont_mgr->get_all_catalogs( ).   " Returns Catalog List
   gt_tile_tm_list = go_flp_cont_mgr->get_all_tiles_tms( ).  " Returns Tile TM List
+                                                            "   -> This list does not contains all data (regarding /ui2/flpcm_cust)
+                                                            "   -> There is some missing tile/tm, so we will not use the result
+                                                            "      but the call to get_all_tiles_tms remains usefull to increase
+                                                            "      execution performance (reducing run time from 15min to 3min)
 
 
   "  Get Catalog Texts
@@ -431,7 +442,8 @@ ENDFORM.
 "&----------------------------------------------------------------------------&"
 FORM export_data_to_csv .
 
-  DATA: lt_tile_tm_combination TYPE          /ui2/if_flp_cont_mgr=>tt_tile_tm_combination_sorted ,
+  DATA: lt_tile_tm_list        TYPE          /ui2/if_flp_cont_mgr=>tt_tile_tm_combination_sorted ,
+        ls_tile_tm_list        TYPE          /ui2/if_flp_cont_mgr=>ts_tile_tm_combination        ,
         lt_roles               TYPE          /ui2/if_flp_cont_mgr=>tt_role                       ,
         ls_roles               TYPE          /ui2/if_flp_cont_mgr=>ts_role                       ,
         lt_role_of_catalog     TYPE          /ui2/if_flp_cont_mgr=>tt_role                       ,
@@ -443,27 +455,63 @@ FORM export_data_to_csv .
         lt_page_t              TYPE TABLE OF /ui2/pb_c_paget                                     ,
         lt_pagem_t             TYPE TABLE OF /ui2/pb_c_pagemt                                    ,
         lv_langu_2c(2)         TYPE          c                                                   ,
-        lv_langu_txt           TYPE          sptxt                                               .
+        lv_langu_txt           TYPE          sptxt                                               ,
+        lv_chip_id             TYPE          /ui2/chip_id_pbc                                    ,
+        lv_sptxt               TYPE          sptxt                                               ,
+        lv_ttm_type            TYPE          /ui2/fdm_tile_type                                  ,
+        lv_catalog_orig_id     TYPE          /ui2/fcm_ttm_tile_cat_id                            ,
+        lv_description         TYPE          /ui2/fcm_role_description                           .
 
   FIELD-SYMBOLS: <fst_text_table> TYPE ANY TABLE ,
                  <fss_text_table> TYPE ANY       ,
                  <fss_text_langu> TYPE ANY       ,
                  <fss_text_title> TYPE ANY       .
 
-  BREAK-POINT.
 
 
   "  Process Data
   " ----------------------------------------------------------
+  PERFORM show_progress_indicator USING 'Collecting Data for CSV Extraction' '' '' '' .
+
+  "
+  " Logic :
+  "
+  "   - We have to read catalog by catalog
+  "   - For one catalog, we have to retrieve all Tile/TM for it because method
+  "     go_flp_cont_mgr->get_all_tiles_tms( ) do not returns the entire list.
+  "     So we can not use a simple READ TABLE on the global list.
+  "
+  "     --> Performances are affected, but without this logic, we have missing data....
+  "
+  "         -> get_all_tiles_tms( ) Method + READ TABLE : 1 minutes 26 secondes of run for :
+  "           -> Catalogs : 2159
+  "           -> Final Tile TM : 17002
+  "
+  "         -> Nested Loop : 15 minutes 8 secondes of run for :
+  "           -> Catalogs : 2159
+  "           -> Final Tile TM : 17487 ( +485 )
+  "
+  "         -> Nested Loop when get_all_tiles_tms( ) is called : 2 minutes 36 secondes of run for :
+  "           -> Catalogs : 2159
+  "           -> Final Tile TM : 17487 ( +485 )
+  "
+  " First, we have to process
   LOOP AT gt_catalog_list INTO gs_catalog_list.
+    REFRESH lt_tile_tm_list.
+
+*    IF sy-tabix GE 10. EXIT. ENDIF. " @TMP_NDU
 
     ls_catalogue_key = go_type_mapper->catalog_key_from_flat( gs_catalog_list ).
-    lt_roles         = go_flp_cont_mgr->get_roles_of_catalog( ls_catalogue_key ). " Returns Father Roles
+    lt_tile_tm_list  = go_flp_cont_mgr->get_tiles_tms_of_catalog( ls_catalogue_key ).
+    lt_roles         = go_flp_cont_mgr->get_roles_of_catalog( ls_catalogue_key ).      " Returns Father Roles
 
 
     " Catalog Parsing
     APPEND VALUE #(
-      catalog_id = gs_catalog_list-id
+      catalog_id  = gs_catalog_list-id
+      type        = gs_catalog_list-type
+      scope       = gs_catalog_list-scope
+      master_lang = gs_catalog_list-master_language
     ) TO gt_csv_catalog .
 
 
@@ -473,6 +521,7 @@ FORM export_data_to_csv .
               ELSE |{ gc_catalog_id_prexif_cat }:{ gs_catalog_list-id }|                                   " X-SAP-UI2-CATALOGPAGE:<catalog_id>
     ).
 
+    " Text Table depend of the scope. (CUST or CONF)
     IF gs_catalog_list-scope EQ gc_scope_conf.
       REFRESH lt_page_t.
       LOOP AT gt_page_t INTO gs_page_t WHERE id = lv_prefixed_catalog_id.
@@ -497,14 +546,13 @@ FORM export_data_to_csv .
 
         IF <fss_text_langu> IS ASSIGNED AND <fss_text_title> IS ASSIGNED.
           " Get Language Designation Its name in its language
-          READ TABLE gt_t002t INTO gs_t002t WITH KEY spras = <fss_text_langu>   " Translation Lang
-                                                     sprsl = <fss_text_langu> . " Language Code
+          PERFORM langu_to_text USING <fss_text_langu> CHANGING lv_sptxt .
 
           " Append to CSV Table
           APPEND VALUE #(
             catalog_id = gs_catalog_list-id
             langu      = <fss_text_langu>
-            sptxt      = gs_t002t-sptxt
+            sptxt      = lv_sptxt
             title      = <fss_text_title>
           ) TO gt_csv_catalogt.
         ENDIF.
@@ -516,21 +564,70 @@ FORM export_data_to_csv .
     ENDIF.
 
 
+    " Read all Tile & TM of the catalog
+    LOOP AT lt_tile_tm_list INTO ls_tile_tm_list .
 
-    " Roles Parsing
+      " Generates the full ID
+      PERFORM tile_tm_to_chip_id USING ls_tile_tm_list CHANGING lv_chip_id .
 
-    " Read 'father role' to get simple one
-*    LOOP AT lt_roles INTO ls_roles.
-*      "
-*
-*      APPEND VALUE #(
-*        agr_name_c = ''                   " Composite Role
-*        agr_name   = ''                   " Role
-*        parent_agr = ls_roles-role_name   " Father
-*        catalog_id = gs_catalog_list-id   " Catalog ID
-*      ) TO gt_csv_role.
-*
-*    ENDLOOP.
+      " Get Type
+      PERFORM get_tile_tm_type USING ls_tile_tm_list CHANGING lv_ttm_type .
+
+      " Get Catalog Origin ID
+      PERFORM get_tile_tm_orig_catalog_id USING ls_tile_tm_list CHANGING lv_catalog_orig_id .
+
+      " Tile TM Parsing
+      APPEND VALUE #(
+        cdm3_ba_id      = ls_tile_tm_list-cdm3_ba_id
+        type            = lv_ttm_type
+        tile_orig_id    = ls_tile_tm_list-tile_orig_id
+        tm_orig_id      = ls_tile_tm_list-tm_orig_id
+        catalog_orig_id = lv_catalog_orig_id
+        semantic_obj    = ls_tile_tm_list-semantic_object
+        semantic_act    = ls_tile_tm_list-semantic_action
+        fiori_id        = ls_tile_tm_list-fiori_id
+        transaction     = ls_tile_tm_list-transaction
+      ) TO gt_csv_tiletm .
+
+
+      " Text Parsing (Is there is at least 1 text in the table)
+      LOOP AT gt_propt INTO gs_propt WHERE bag_parentid = lv_chip_id .
+        " Get Language Designation Its name in its language
+        PERFORM langu_to_text USING gs_propt-langu CHANGING lv_sptxt .
+
+        " -> que des display_text
+        APPEND VALUE #(
+*          cdm3_ba_id = gs_tile_tm_list-cdm3_ba_id
+          cdm3_ba_id = ls_tile_tm_list-cdm3_ba_id
+          langu      = gs_propt-langu
+          sptxt      = lv_sptxt
+          title      = gs_propt-value
+        ) TO gt_csv_tiletmt .
+
+      ENDLOOP.
+
+    ENDLOOP.
+
+
+    " Roles Processing
+    LOOP AT lt_roles INTO ls_roles .
+
+      " Get Role Description
+      READ TABLE gt_role_list INTO gs_role_list WITH KEY role_name = ls_roles-role_name .
+
+      CLEAR lv_description.
+      IF sy-subrc EQ 0.
+        lv_description = gs_role_list-description .
+      ENDIF.
+
+      " Role Parsing
+      APPEND VALUE #(
+        catalog_id  = gs_catalog_list-id
+        agr_name    = ls_roles-role_name
+        description = lv_description
+      ) TO gt_csv_role .
+
+    ENDLOOP.
 
   ENDLOOP.
 
@@ -542,9 +639,20 @@ FORM export_data_to_csv .
 
   "  Write CSV Files
   " ----------------------------------------------------------
-  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_catalogs.csv'       CHANGING gt_csv_catalog .
+*  PERFORM show_progress_indicator USING 'Extracting Catalogs' '' '' '' .
+  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_catalogs.csv'       CHANGING gt_csv_catalog  .
+
+*  PERFORM show_progress_indicator USING 'Extracting Catalogs Texts' '' '' '' .
   PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_catalogs_texts.csv' CHANGING gt_csv_catalogt .
-  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_role.csv'           CHANGING gt_csv_role .
+
+*  PERFORM show_progress_indicator USING 'Extracting Tile & Target Mappings' '' '' '' .
+  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_tile_tm.csv'        CHANGING gt_csv_tiletm   .
+
+*  PERFORM show_progress_indicator USING 'Extracting Tile & Target Mappings Texts' '' '' '' .
+  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_tile_tm_texts.csv'  CHANGING gt_csv_tiletmt  .
+
+*  PERFORM show_progress_indicator USING 'Etractings Roles' '' '' '' .
+  PERFORM int_tab_to_csv_file USING '/tmp/flpcm_cust_role.csv'           CHANGING gt_csv_role     .
 
 
 ENDFORM.
@@ -552,17 +660,101 @@ ENDFORM.
 "&----------------------------------------------------------------------------&"
 
 
+FORM langu_to_text    USING iv_langu TYPE langu
+                   CHANGING cv_text  TYPE sptxt .
+
+  " Get Language Designation Its name in its language
+  READ TABLE gt_t002t INTO gs_t002t WITH KEY spras = iv_langu   " Translation Lang
+                                             sprsl = iv_langu . " Language Code
+
+  IF sy-subrc EQ 0.
+    cv_text = gs_t002t-sptxt .
+  ENDIF.
+
+ENDFORM.
+
 
 FORM tile_tm_to_chip_id    USING is_tile_tm TYPE /ui2/if_flp_cont_mgr=>ts_tile_tm_combination
                         CHANGING cv_chip_id TYPE /ui2/chip_id_pbc                              .
 
+  " When entri is Tile + Target Mapping
+  " In any case, title cam from Target Map (synchronize even they represents independant entry)
+  " But for Tile Only, we have to use TILE_ORIG_ID instead of TM_ORIG_ID.
   cv_chip_id = COND #(
-    WHEN is_tile_tm-tm_orig_catalog_type EQ gc_catalog_typ_car
-    THEN |{ gc_chip_id_prefix_car }:{ gc_catalog_id_prexif_car }:{ is_tile_tm-tm_orig_catalog_id }:{ is_tile_tm-tm_orig_catalog_sysalias }:{ is_tile_tm-tm_orig_id }|
-    ELSE |{ gc_chip_id_prefix_cat }:{ gc_catalog_id_prexif_cat }:{ is_tile_tm-tm_orig_catalog_id }:{ is_tile_tm-tm_orig_id }|
+    WHEN is_tile_tm-tile_tm_matching EQ gc_ico_tile " White square under a yellow one (Tile only -> no TM ID)
+    THEN
+      COND #(
+        WHEN is_tile_tm-tm_orig_catalog_type EQ gc_catalog_typ_car
+        THEN |{ gc_chip_id_prefix_car }:{ gc_catalog_id_prexif_car }:{ is_tile_tm-tile_orig_catalog_id }:{ is_tile_tm-tm_orig_catalog_sysalias }:{ is_tile_tm-tile_orig_id }|
+        ELSE |{ gc_chip_id_prefix_cat }:{ gc_catalog_id_prexif_cat }:{ is_tile_tm-tile_orig_catalog_id }:{ is_tile_tm-tile_orig_id }|
+      )
+    ELSE
+      COND #(
+        WHEN is_tile_tm-tm_orig_catalog_type EQ gc_catalog_typ_car
+        THEN |{ gc_chip_id_prefix_car }:{ gc_catalog_id_prexif_car }:{ is_tile_tm-tm_orig_catalog_id }:{ is_tile_tm-tm_orig_catalog_sysalias }:{ is_tile_tm-tm_orig_id }|
+        ELSE |{ gc_chip_id_prefix_cat }:{ gc_catalog_id_prexif_cat }:{ is_tile_tm-tm_orig_catalog_id }:{ is_tile_tm-tm_orig_id }|
+      )
   ).
 
 ENDFORM .
+
+
+FORM get_tile_tm_type     USING is_tile_tm  TYPE /ui2/if_flp_cont_mgr=>ts_tile_tm_combination
+                       CHANGING cv_ttm_type TYPE /ui2/fdm_tile_type                           .
+
+  CASE is_tile_tm-tile_tm_matching .
+    WHEN gc_ico_tile .
+      cv_ttm_type = gc_ttm_type_tile .
+
+    WHEN gc_ico_tiletm .
+      cv_ttm_type = gc_ttm_type_tile_tm .
+
+    WHEN gc_ico_tm .
+      cv_ttm_type = gc_ttm_type_tm .
+
+    WHEN OTHERS.
+
+  ENDCASE.
+
+ENDFORM.
+
+FORM get_tile_tm_orig_catalog_id      USING is_tile_tm     TYPE /ui2/if_flp_cont_mgr=>ts_tile_tm_combination
+                                   CHANGING cv_cat_orig_id TYPE /ui2/fcm_ttm_tile_cat_id                     .
+
+  " When entri is Tile + Target Mapping
+  " In any case, title cam from Target Map (synchronize even they represents independant entry)
+  " But for Tile Only, we have to use TILE_ORIG_ID instead of TM_ORIG_ID.
+  cv_cat_orig_id = COND #(
+    WHEN is_tile_tm-tile_tm_matching EQ gc_ico_tile " White square under a yellow one (Tile only -> no TM ID)
+    THEN
+      |{ is_tile_tm-tile_orig_catalog_id }|
+    ELSE
+      |{ is_tile_tm-tm_orig_catalog_id }|
+  ).
+
+ENDFORM .
+
+
+FORM show_progress_indicator USING iv_msgv1 TYPE msgv1
+                                   iv_msgv2 TYPE msgv2
+                                   iv_msgv3 TYPE msgv3
+                                   iv_msgv4 TYPE msgv4 .
+
+  go_progress_indicator->/ui2/if_gui_progress_indicator~progress_indicate_for_msg(
+    is_msg                = value #(
+      msgid = '0K'
+      msgno = 000
+      msgty = 'I'
+      msgv1 = iv_msgv1
+      msgv2 = iv_msgv2
+      msgv3 = iv_msgv3
+      msgv4 = iv_msgv4
+    )
+    iv_num_item_processed = 0
+    iv_num_item_total     = 1
+  ).
+
+ENDFORM.
 
 
 
@@ -653,3 +845,13 @@ FORM int_tab_to_csv_file using iv_filepath CHANGING ct_inttab TYPE STANDARD TABL
   CLOSE DATASET iv_filepath .
 
 ENDFORM.
+
+
+" Pour avoir toutes les tuiles pour 1 catalogue :
+"
+"   -> Ne pas utiliser get_all_tile_tms machin et les récupérer individuellement MAIS la concerver pour les perfs
+"
+"
+"
+"   mt_tile_tm_combination = mo_flp_cont_mgr->get_tiles_tms_of_catalog( lo_type_mapper->catalog_key_from_flat( mt_selected_catalog[ 1 ] ) ).
+"
